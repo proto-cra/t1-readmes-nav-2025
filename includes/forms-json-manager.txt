@@ -1,0 +1,144 @@
+  <!-- URL mapping, a central management to avoid racing condition -->
+  < div data - wb - urlmapping = '{
+  "year": [{
+      "action": "tblfilter",
+      "source": "#year-filter",
+      "column": 0,
+      "value": "{qval}",
+      "match": "^[1-2][0-9][0-9][0-9]$",
+      "default": "2024"
+    },
+    {
+      "action": "patch",
+      "source": "#define-the-year",
+      "base": "/years",
+      "match": "^[0-9][0-9][0-9][0-9]$",
+      "default": "0000",
+      "patches": [{
+        "op": "copy",
+        "from": "/years/{qval}",
+        "path": "/select/year"
+      }]
+    }
+  ],
+  "region": [{
+    "action": "patch",
+    "source": "#define-the-region",
+    "base": "/regions",
+    "match": "^[a-z][a-z]$",
+    "default": "ni",
+    "patches": [{
+      "op": "copy",
+      "from": "/regions/{qval}",
+      "path": "/select/region"
+    }]
+  }],
+  "multiplequery": true
+  }
+  '></div>
+
+  <!-- Data source -->
+  < div id = "sourceData"
+  data - wb - jsonmanager = '{
+  "url": "/content/dam/cra-arc/test/parissa-json/yr-prov.json",
+  "patches": {
+    "op": "add",
+    "path": "/select",
+    "value": {}
+  },
+  "name": "sourceData"
+  }
+  '></div>
+
+  <!-- Manager to receive the URL mapping update from the "year" parameter -->
+  < div id = "define-the-year"
+  data - wb - jsonmanager - reload data - wb - jsonmanager = '{
+  "url": "#[sourceData]",
+  "wait": true,
+  "name": "year-set"
+  }
+  '></div>
+  < div id = "define-the-region"
+  data - wb - jsonmanager - reload data - wb - jsonmanager = '{
+  "url": "#[sourceData]",
+  "wait": true,
+  "name": "region-set"
+  }
+  '></div>
+
+  <!-- Final JSON manager that assemble the paralel operation, This ensure that all operations are completed before to proceed, so this avoid a race condition -->
+  < div data - wb - jsonmanager = '{
+  "url": [{
+    "url": "#[year-set]/select"
+  }, {
+    "url": "#[region-set]/select"
+  }],
+  "name": "find-other-form",
+  "patches": {
+    "op": "add",
+    "path": "/emptystr",
+    "value": ""
+  }
+  }
+  '></div>
+
+  <!-- Render the personalized paragraph content, also it will only being display if valid info was provided  -->
+  < div data - wb - json = '{
+  "url": "#[find-other-form]",
+  "streamline": true,
+  "template": "template",
+  "mapping": [{
+      "selector": "[data-year]",
+      "value": "/year"
+    },
+    {
+      "selector": "[data-region]",
+      "value": "/region/0"
+    },
+    {
+      "selector": "[data-anchor]",
+      "value": "/year",
+      "placeholder": "[[years]]"
+    },
+    {
+      "selector": "[data-anchor]",
+      "value": "/region/0",
+      "placeholder": "[[regions]]"
+    },
+    {
+      "selector": "[data-anchor]",
+      "value": "/year",
+      "attr": "href",
+      "placeholder": "--years--"
+    },
+    {
+      "selector": "[data-anchor]",
+      "value": "/region/2",
+      "attr": "href",
+      "placeholder": "--regions--"
+    },
+    {
+      "mapping": {
+        "selector": "[data-paragraph]",
+        "attr": "class",
+        "placeholder": "- hidden -",
+        "value": "/emptystr"
+      }
+    },
+    {
+      "mapping": {
+        "selector": "[data-paragraph]",
+        "attr": "class",
+        "placeholder": "* hidden *",
+        "value": "/emptystr"
+      }
+    }
+  ]
+  }
+  '>
+  < template
+    >
+    < p data - paragraph class = "- hidden -* hidden *" > To find other < span data - year > year < /span> forms or guides you may need <span data-region>region</span > ,
+    return to the < a data - anchor href = https: //www.canada.ca/en/revenue-agency/services/forms-publications/tax-packages-years/archived-general-income-tax-benefit-package---years----regions--.html>[[years]] Income tax package [[regions]]</a>.</p>
+      < /template>
+      < /div>
