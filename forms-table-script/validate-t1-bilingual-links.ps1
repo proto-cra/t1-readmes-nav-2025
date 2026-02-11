@@ -1,7 +1,7 @@
 <# 
 Validate-T1-BilingualLinks.ps1
 
-Checks bilingual (EN/FR) tables for each $formname in recent-T1-forms-10yrs.txt.
+Checks bilingual (EN/FR) tables for each $formname in recent-T1-forms-9yrs.txt.
 For each matching EN/FR cell (excluding the first “Year/Année” column):
 - If BOTH links return HTTP 200 => leave as-is
 - Otherwise => replace the cell HTML with:
@@ -21,7 +21,7 @@ Usage:
 
 [CmdletBinding()]
 param(
-  [string]$FormsPath = ".\recent-T1-forms-10yrs.txt",
+  [string]$FormsPath = ".\recent-T1-forms-9yrs.txt",
   [string]$ResultsFolder = ".\results",
   [int]$TimeoutSec = 12,
   [switch]$DryRun
