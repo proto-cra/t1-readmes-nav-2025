@@ -14,19 +14,11 @@ Handover notes
     <thead>
       <tr>
         <th>Année</th>
-        <th>PDF à remplir</th>
+        <th>Télécharger un PDF à remplir</th>
         <th>PDF en caractères standards</th>
         <th>PDF en gros caractères</th>
-        <th>Texte électronique</th>
+        <th>Télécharger le texte électronique</th>
 
-    <caption class="wb-inv">Versions disponibles des années précédentes</caption>
-    <thead>
-      <tr>
-        <th>Année</th>
-        <th>PDF à remplir</th>
-        <th>PDF en caractères standards</th>
-        <th>PDF en gros caractères</th>
-        <th>Texte électronique</th>
 
 -------------------
     <td>Current page</td>
