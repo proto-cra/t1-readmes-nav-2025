@@ -252,6 +252,8 @@ function Test-Url200 {
 
 $EN_NA = '<span class="small text-muted">Not available</span>'
 $FR_NA = '<span class="small text-muted">Pas disponible</span>'
+$EN_NAP = '<span class="small text-muted">Not applicable</span>'
+$FR_NAP = '<span class="small text-muted">Pas applicable</span>'
 
 if (-not (Test-Path -LiteralPath $FormsPath)) {
   throw "Forms list not found: $FormsPath"
@@ -344,6 +346,36 @@ foreach ($form in $forms) {
         $enCellReplacements[$ci] = $EN_NA
         $frCellReplacements[$ci] = $FR_NA
         $changed++
+      }
+    }
+
+    # After link validation/replacement, if a row has no links left at all,
+    # mark all non-year cells as Not applicable / Pas applicable.
+    $rowHasAnyLink = $false
+    for ($ci = 1; $ci -lt $colCount; $ci++) {
+      $enFinalCell = if ($enCellReplacements.ContainsKey($ci)) { [string]$enCellReplacements[$ci] } else { $enCells[$ci].Groups['cell'].Value }
+      $frFinalCell = if ($frCellReplacements.ContainsKey($ci)) { [string]$frCellReplacements[$ci] } else { $frCells[$ci].Groups['cell'].Value }
+      if ((Get-LinkHref $enFinalCell) -or (Get-LinkHref $frFinalCell)) {
+        $rowHasAnyLink = $true
+        break
+      }
+    }
+
+    if (-not $rowHasAnyLink) {
+      for ($ci = 1; $ci -lt $colCount; $ci++) {
+        $enFinalCell = if ($enCellReplacements.ContainsKey($ci)) { [string]$enCellReplacements[$ci] } else { $enCells[$ci].Groups['cell'].Value }
+        $frFinalCell = if ($frCellReplacements.ContainsKey($ci)) { [string]$frCellReplacements[$ci] } else { $frCells[$ci].Groups['cell'].Value }
+
+        $rowCellChanged = $false
+        if ($enFinalCell -notmatch $EN_NAP) {
+          $enCellReplacements[$ci] = $EN_NAP
+          $rowCellChanged = $true
+        }
+        if ($frFinalCell -notmatch $FR_NAP) {
+          $frCellReplacements[$ci] = $FR_NAP
+          $rowCellChanged = $true
+        }
+        if ($rowCellChanged) { $changed++ }
       }
     }
 
