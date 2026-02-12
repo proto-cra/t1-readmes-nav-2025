@@ -11,9 +11,9 @@ from any current working directory.
 
 [CmdletBinding()]
 param(
-  [string]$PubsListPath = ".\recent-T1-forms-9yrs.txt",
-  [string]$TemplateEnPath = ".\5000-s2-table-e.htm",
-  [string]$TemplateFrPath = ".\5000-s2-table-f.htm",
+  [string]$PubsListPath = ".\recent-T1-pubs-9yrs.txt",
+  [string]$TemplateEnPath = ".\pubs-table-template-e.htm",
+  [string]$TemplateFrPath = ".\pubs-table-template-f.htm",
   [string]$OutputDir,
   [int]$TimeoutSec = 12,
   [switch]$DryRun
@@ -65,6 +65,7 @@ function Resolve-TablePath {
     [Parameter(Mandatory)] [string]$PubName,
     [Parameter(Mandatory)] [ValidateSet('e', 'f')] [string]$Lang
   )
+  # Prefer .htm outputs but accept .html if present.
   $candidates = @(
     (Join-Path $ResultsFolder "$PubName-table-$Lang.htm"),
     (Join-Path $ResultsFolder "$PubName-table-$Lang.html")
@@ -78,6 +79,7 @@ function Resolve-TablePath {
 function Get-PubsList {
   param([Parameter(Mandatory)] [string]$Path)
 
+  # Ignore empty lines and comments.
   return Get-Content -LiteralPath $Path |
     ForEach-Object { $_.Trim() } |
     Where-Object { $_ -and -not $_.StartsWith('#') }
@@ -95,6 +97,7 @@ function Split-RowMatches {
 
 function Split-CellMatches {
   param([string]$RowHtml)
+  # Capture both <th> and <td> cell wrappers and inner HTML.
   return [regex]::Matches(
     $RowHtml,
     '<(?<tag>th|td)(?<attrs>\s+[^>]*)?>(?<cell>.*?)</\k<tag>>',
@@ -109,9 +112,7 @@ function Get-EffectiveCellContent {
     [Parameter(Mandatory)] [object[]]$Cells
   )
 
-  if ($Replacements.ContainsKey($CellIndex)) {
-    return [string]$Replacements[$CellIndex]
-  }
+  if ($Replacements.ContainsKey($CellIndex)) { return [string]$Replacements[$CellIndex] }
   return $Cells[$CellIndex].Groups['cell'].Value
 }
 
@@ -190,6 +191,7 @@ function Replace-TBodyInHtml {
 
 function Get-LinkHref {
   param([string]$CellHtml)
+  # Extract the first href value from a cell.
   $m = [regex]::Match($CellHtml, 'href\s*=\s*"([^"]+)"', 'IgnoreCase')
   if ($m.Success) { return $m.Groups[1].Value }
   return $null
@@ -201,6 +203,7 @@ function Replace-AnchorHrefAndText {
     [Parameter(Mandatory)] [string]$NewHref
   )
 
+  # Replace the first <a> tag with the new href and (if applicable) new filename text.
   $anchorMatch = [regex]::Match($CellHtml, '<a\b(?<attrs>[^>]*)>(?<text>.*?)(</a>)?', 'Singleline,IgnoreCase')
   if (-not $anchorMatch.Success) { return $CellHtml }
 
@@ -215,10 +218,6 @@ function Replace-AnchorHrefAndText {
 
   $cleanHref = ($NewHref -split '[?#]')[0]
   $fileName = [System.IO.Path]::GetFileName($cleanHref)
-  if ($fileName -and $text -notmatch '<' -and $text -match '\.(pdf|txt|zip|htm|html)$' -and $text -notmatch '\s') {
-    $text = $fileName
-  }
-
   $newText = $text
   if ($fileName) {
     $isFileText = ($text -notmatch '<' -and $text -match '\.(pdf|txt|zip|htm|html)$' -and $text -notmatch '\s')
@@ -234,6 +233,7 @@ function Is-PlaceholderHref {
   param([string]$Href)
   if (-not $Href) { return $false }
   $norm = $Href.Trim().ToLowerInvariant()
+  # Treat "#" as a placeholder link that should be ignored.
   return ($norm -eq '#')
 }
 
@@ -246,6 +246,7 @@ function Get-AlternatePubUrls {
   $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
   if ($seen.Add($Href)) { $alternates.Add($Href) }
 
+  # Only consider CRA forms/pubs pattern; otherwise, return the original URL.
   $match = [regex]::Match(
     $Href,
     '^(?<base>.*?/pub/)(?<folder>\d{4}-g)/(?<file>[^/?#]+)(?<tail>[?#].*)?$',
@@ -264,6 +265,7 @@ function Get-AlternatePubUrls {
     if ($seen.Add($url)) { $alternates.Add($url) }
   }
 
+  # 5xxx-g sometimes appears as 5xxxg in the filename (folder stays 5xxx-g).
   $fileNoHyphen = $null
   $fileNoHyphenMatch = [regex]::Match($file, '^(?<code>\d{4})-g(?<rest>.*)$', 'IgnoreCase')
   if ($fileNoHyphenMatch.Success) {
@@ -271,6 +273,7 @@ function Get-AlternatePubUrls {
     Add-AltUrl -FolderValue $folder -FileValue $fileNoHyphen
   }
 
+  # Some older filenames swap between 50xx and 51xx.
   $fileSwapMatch = [regex]::Match($file, '^(?<prefix>50|51)(?<rest>.*)$', 'IgnoreCase')
   if ($fileSwapMatch.Success) {
     $swapPrefix = if ($fileSwapMatch.Groups['prefix'].Value -eq '50') { '51' } else { '50' }
@@ -292,6 +295,7 @@ function Get-AlternatePubUrls {
 
 function Is-NotAvailableCell {
   param([string]$CellHtml)
+  # Detect standard "Not available" placeholders.
   return [regex]::IsMatch(
     $CellHtml,
     '<span\s+class\s*=\s*"small\s+text-muted"\s*>\s*(Not\s+available|Pas\s+disponible)\s*</span>',
@@ -301,6 +305,7 @@ function Is-NotAvailableCell {
 
 function Test-Url200 {
   param([Parameter(Mandatory)] [string]$Url, [int]$TimeoutSec = 10)
+  # HEAD first, then fall back to GET to accommodate servers that block HEAD.
   try {
     $resp = Invoke-WebRequest -Uri $Url -Method Head -TimeoutSec $TimeoutSec -MaximumRedirection 0 -UseBasicParsing -ErrorAction Stop
     if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300) { return $true }
@@ -318,6 +323,7 @@ function Test-Url200 {
 function Resolve-ValidUrl {
   param([Parameter(Mandatory)] [string]$Url, [int]$TimeoutSec = 10)
 
+  # Try original URL and alternates; return the first that validates.
   foreach ($candidate in (Get-AlternatePubUrls -Href $Url)) {
     if (Test-Url200 -Url $candidate -TimeoutSec $TimeoutSec) {
       return [pscustomobject]@{

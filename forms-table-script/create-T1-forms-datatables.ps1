@@ -12,8 +12,8 @@ from any current working directory.
 [CmdletBinding()]
 param(
   [string]$FormsListPath = ".\recent-T1-forms-9yrs.txt",
-  [string]$TemplateEnPath = ".\5000-s2-table-e.htm",
-  [string]$TemplateFrPath = ".\5000-s2-table-f.htm",
+  [string]$TemplateEnPath = ".\forms-table-template-e.htm",
+  [string]$TemplateFrPath = ".\forms-table-template-f.htm",
   [string]$OutputDir,
   [int]$TimeoutSec = 12,
   [switch]$DryRun
