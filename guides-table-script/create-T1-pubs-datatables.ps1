@@ -102,6 +102,19 @@ function Split-CellMatches {
   )
 }
 
+function Get-EffectiveCellContent {
+  param(
+    [Parameter(Mandatory)] [hashtable]$Replacements,
+    [Parameter(Mandatory)] [int]$CellIndex,
+    [Parameter(Mandatory)] [object[]]$Cells
+  )
+
+  if ($Replacements.ContainsKey($CellIndex)) {
+    return [string]$Replacements[$CellIndex]
+  }
+  return $Cells[$CellIndex].Groups['cell'].Value
+}
+
 function Replace-CellsInRow {
   param(
     [string]$RowHtml,
@@ -182,11 +195,99 @@ function Get-LinkHref {
   return $null
 }
 
+function Replace-AnchorHrefAndText {
+  param(
+    [Parameter(Mandatory)] [string]$CellHtml,
+    [Parameter(Mandatory)] [string]$NewHref
+  )
+
+  $anchorMatch = [regex]::Match($CellHtml, '<a\b(?<attrs>[^>]*)>(?<text>.*?)(</a>)?', 'Singleline,IgnoreCase')
+  if (-not $anchorMatch.Success) { return $CellHtml }
+
+  $attrs = $anchorMatch.Groups['attrs'].Value
+  $text = $anchorMatch.Groups['text'].Value
+
+  if ($attrs -match '\bhref\s*=') {
+    $attrs = [regex]::Replace($attrs, '\bhref\s*=\s*"[^"]*"', "href=`"$NewHref`"", 'IgnoreCase')
+  } else {
+    $attrs = "$attrs href=`"$NewHref`""
+  }
+
+  $cleanHref = ($NewHref -split '[?#]')[0]
+  $fileName = [System.IO.Path]::GetFileName($cleanHref)
+  if ($fileName -and $text -notmatch '<' -and $text -match '\.(pdf|txt|zip|htm|html)$' -and $text -notmatch '\s') {
+    $text = $fileName
+  }
+
+  $newText = $text
+  if ($fileName) {
+    $isFileText = ($text -notmatch '<' -and $text -match '\.(pdf|txt|zip|htm|html)$' -and $text -notmatch '\s')
+    if ($isFileText -or [string]::IsNullOrWhiteSpace($text)) {
+      $newText = $fileName
+    }
+  }
+
+  return "<a$attrs>$newText</a>"
+}
+
 function Is-PlaceholderHref {
   param([string]$Href)
   if (-not $Href) { return $false }
   $norm = $Href.Trim().ToLowerInvariant()
   return ($norm -eq '#')
+}
+
+function Get-AlternatePubUrls {
+  param([string]$Href)
+
+  $alternates = [System.Collections.Generic.List[string]]::new()
+  if (-not $Href) { return $alternates }
+
+  $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  if ($seen.Add($Href)) { $alternates.Add($Href) }
+
+  $match = [regex]::Match(
+    $Href,
+    '^(?<base>.*?/pub/)(?<folder>\d{4}-g)/(?<file>[^/?#]+)(?<tail>[?#].*)?$',
+    'IgnoreCase'
+  )
+  if (-not $match.Success) { return $alternates }
+
+  $base = $match.Groups['base'].Value
+  $folder = $match.Groups['folder'].Value
+  $file = $match.Groups['file'].Value
+  $tail = $match.Groups['tail'].Value
+
+  function Add-AltUrl {
+    param([string]$FolderValue, [string]$FileValue)
+    $url = "$base$FolderValue/$FileValue$tail"
+    if ($seen.Add($url)) { $alternates.Add($url) }
+  }
+
+  $fileNoHyphen = $null
+  $fileNoHyphenMatch = [regex]::Match($file, '^(?<code>\d{4})-g(?<rest>.*)$', 'IgnoreCase')
+  if ($fileNoHyphenMatch.Success) {
+    $fileNoHyphen = "$($fileNoHyphenMatch.Groups['code'].Value)g$($fileNoHyphenMatch.Groups['rest'].Value)"
+    Add-AltUrl -FolderValue $folder -FileValue $fileNoHyphen
+  }
+
+  $fileSwapMatch = [regex]::Match($file, '^(?<prefix>50|51)(?<rest>.*)$', 'IgnoreCase')
+  if ($fileSwapMatch.Success) {
+    $swapPrefix = if ($fileSwapMatch.Groups['prefix'].Value -eq '50') { '51' } else { '50' }
+    $fileSwap = "$swapPrefix$($fileSwapMatch.Groups['rest'].Value)"
+    Add-AltUrl -FolderValue $folder -FileValue $fileSwap
+  }
+
+  if ($fileNoHyphen) {
+    $fileNoHyphenSwapMatch = [regex]::Match($fileNoHyphen, '^(?<prefix>50|51)(?<rest>.*)$', 'IgnoreCase')
+    if ($fileNoHyphenSwapMatch.Success) {
+      $swapPrefix = if ($fileNoHyphenSwapMatch.Groups['prefix'].Value -eq '50') { '51' } else { '50' }
+      $fileNoHyphenSwap = "$swapPrefix$($fileNoHyphenSwapMatch.Groups['rest'].Value)"
+      Add-AltUrl -FolderValue $folder -FileValue $fileNoHyphenSwap
+    }
+  }
+
+  return $alternates
 }
 
 function Is-NotAvailableCell {
@@ -212,6 +313,23 @@ function Test-Url200 {
     }
   }
   return $false
+}
+
+function Resolve-ValidUrl {
+  param([Parameter(Mandatory)] [string]$Url, [int]$TimeoutSec = 10)
+
+  foreach ($candidate in (Get-AlternatePubUrls -Href $Url)) {
+    if (Test-Url200 -Url $candidate -TimeoutSec $TimeoutSec) {
+      return [pscustomobject]@{
+        IsValid = $true
+        Url     = $candidate
+      }
+    }
+  }
+  return [pscustomobject]@{
+    IsValid = $false
+    Url     = $Url
+  }
 }
 
 function Read-TextFilePreserveEncoding {
@@ -397,8 +515,9 @@ foreach ($pub in $pubs) {
       $enIsNA = Is-NotAvailableCell $enCell
       $frIsNA = Is-NotAvailableCell $frCell
       if ($enIsNA -or $frIsNA) {
-        if ($enCell -notmatch $EN_NA) { $enCellReplacements[$ci] = $EN_NA; $changed++ }
-        if ($frCell -notmatch $FR_NA) { $frCellReplacements[$ci] = $FR_NA; $changed++ }
+        if ($enCell -notmatch $EN_NA) { $enCellReplacements[$ci] = $EN_NA }
+        if ($frCell -notmatch $FR_NA) { $frCellReplacements[$ci] = $FR_NA }
+        $changed++
         continue
       }
 
@@ -420,13 +539,30 @@ foreach ($pub in $pubs) {
         continue
       }
 
-      $enValid = Test-Url200 -Url $enHref -TimeoutSec $TimeoutSec
-      $frValid = Test-Url200 -Url $frHref -TimeoutSec $TimeoutSec
+      $enResult = Resolve-ValidUrl -Url $enHref -TimeoutSec $TimeoutSec
+      $frResult = Resolve-ValidUrl -Url $frHref -TimeoutSec $TimeoutSec
 
-      if (-not ($enValid -and $frValid)) {
+      if (-not ($enResult.IsValid -and $frResult.IsValid)) {
         $enCellReplacements[$ci] = $EN_NA
         $frCellReplacements[$ci] = $FR_NA
         $changed++
+        continue
+      }
+
+      if ($enResult.Url -ne $enHref) {
+        $updatedEnCell = Replace-AnchorHrefAndText -CellHtml $enCell -NewHref $enResult.Url
+        if ($updatedEnCell -ne $enCell) {
+          $enCellReplacements[$ci] = $updatedEnCell
+          $changed++
+        }
+      }
+
+      if ($frResult.Url -ne $frHref) {
+        $updatedFrCell = Replace-AnchorHrefAndText -CellHtml $frCell -NewHref $frResult.Url
+        if ($updatedFrCell -ne $frCell) {
+          $frCellReplacements[$ci] = $updatedFrCell
+          $changed++
+        }
       }
     }
 
